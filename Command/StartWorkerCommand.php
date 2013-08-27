@@ -32,6 +32,7 @@ class StartWorkerCommand extends ContainerAwareCommand
             'VERBOSE'     => 1,
             'COUNT'       => $input->getOption('count'),
             'INTERVAL'    => $input->getOption('interval'),
+            'PATH'        => getenv('PATH'),
         );
         $prefix = $this->getContainer()->getParameter('bcc_resque.prefix');
         if (!empty($prefix)) {
