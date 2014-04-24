@@ -2,6 +2,8 @@
 
 namespace BCC\ResqueBundle;
 
+use Psr\Log\NullLogger;
+
 class Resque
 {
     /**
@@ -13,6 +15,16 @@ class Resque
      * @var array
      */
     private $redisConfiguration;
+
+    /**
+     * @var array
+     */
+    private $globalRetryStrategy = array();
+
+    /**
+     * @var array
+     */
+    private $jobRetryStrategy = array();
 
     public function __construct(array $kernelOptions)
     {
@@ -35,6 +47,16 @@ class Resque
         \Resque::setBackend($host.':'.$port, $database);
     }
 
+    public function setGlobalRetryStrategy($strategy)
+    {
+        $this->globalRetryStrategy = $strategy;
+    }
+
+    public function setJobRetryStrategy($strategy)
+    {
+        $this->jobRetryStrategy = $strategy;
+    }
+
     public function getRedisConfiguration()
     {
         return $this->redisConfiguration;
@@ -45,6 +67,8 @@ class Resque
         if ($job instanceof ContainerAwareJob) {
             $job->setKernelOptions($this->kernelOptions);
         }
+
+        $this->attachRetryStrategy($job);
 
         $result = \Resque::enqueue($job->queue, \get_class($job), $job->args, $trackStatus);
 
@@ -77,6 +101,8 @@ class Resque
             $job->setKernelOptions($this->kernelOptions);
         }
 
+        $this->attachRetryStrategy($job);
+
         \ResqueScheduler::enqueueAt($at, $job->queue, \get_class($job), $job->args);
 
         return null;
@@ -87,6 +113,8 @@ class Resque
         if ($job instanceof ContainerAwareJob) {
             $job->setKernelOptions($this->kernelOptions);
         }
+
+        $this->attachRetryStrategy($job);
 
         \ResqueScheduler::enqueueIn($in, $job->queue, \get_class($job), $job->args);
 
@@ -149,6 +177,7 @@ class Resque
     {
         // HACK, prune dead workers, just in case
         $worker = new \Resque_Worker('temp');
+        $worker->setLogger(new NullLogger());
         $worker->pruneDeadWorkers();
     }
 
@@ -214,5 +243,24 @@ class Resque
         }
 
         return $result;
+    }
+
+    /**
+     * Attach any applicable retry strategy to the job.
+     *
+     * @param Job $job
+     */
+    protected function attachRetryStrategy($job)
+    {
+        $class = get_class($job);
+
+        if (isset($this->jobRetryStrategy[$class])) {
+            if (count($this->jobRetryStrategy[$class])) {
+                $job->args['bcc_resque.retry_strategy'] = $this->jobRetryStrategy[$class];
+            }
+            $job->args['bcc_resque.retry_strategy'] = $this->jobRetryStrategy[$class];
+        } elseif (count($this->globalRetryStrategy)) {
+            $job->args['bcc_resque.retry_strategy'] = $this->globalRetryStrategy;
+        }
     }
 }

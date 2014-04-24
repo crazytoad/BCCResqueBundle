@@ -3,12 +3,13 @@
 namespace BCC\ResqueBundle\Controller;
 
 use Symfony\Bundle\FrameworkBundle\Controller\Controller;
-use BCC\ResqueBundle\Resque;
 
 class DefaultController extends Controller
 {
     public function indexAction()
     {
+        $this->getResque()->pruneDeadWorkers();
+        
         return $this->render(
             'BCCResqueBundle:Default:index.html.twig',
             array(

@@ -26,31 +26,49 @@ class StartWorkerCommand extends ContainerAwareCommand
 
     protected function execute(InputInterface $input, OutputInterface $output)
     {
-        $env = array(
-            'APP_INCLUDE' => $this->getContainer()->getParameter('kernel.root_dir').'/bootstrap.php.cache',
-            'QUEUE'       => $input->getArgument('queues'),
-            'VERBOSE'     => 1,
-            'COUNT'       => $input->getOption('count'),
-            'INTERVAL'    => $input->getOption('interval'),
-            'PATH'        => getenv('PATH'),
-        );
+        $env = array();
+
+        // here to work around issues with pcntl and cli_set_process_title in PHP > 5.5
+        if (version_compare(PHP_VERSION, '5.5.0') >= 0) {
+            $env = $_SERVER;
+            unset(
+                $env['_'],
+                $env['PHP_SELF'],
+                $env['SCRIPT_NAME'],
+                $env['SCRIPT_FILENAME'],
+                $env['PATH_TRANSLATED'],
+                $env['argv']
+            );
+        }
+
+        $env['APP_INCLUDE'] = $this->getContainer()->getParameter('kernel.root_dir').'/bootstrap.php.cache';
+        $env['COUNT']       = $input->getOption('count');
+        $env['INTERVAL']    = $input->getOption('interval');
+        $env['QUEUE']       = $input->getArgument('queues');
+        $env['VERBOSE']     = 1;
+        $env['PATH']        = getenv('PATH');
+
         $prefix = $this->getContainer()->getParameter('bcc_resque.prefix');
         if (!empty($prefix)) {
             $env['PREFIX'] = $this->getContainer()->getParameter('bcc_resque.prefix');
         }
+
         if ($input->getOption('verbose')) {
             $env['VVERBOSE'] = 1;
         }
+
         if ($input->getOption('quiet')) {
             unset($env['VERBOSE']);
         }
 
-        $redisHost = $this->getContainer()->getParameter('bcc_resque.resque.redis.host');
-        $redisPort = $this->getContainer()->getParameter('bcc_resque.resque.redis.port');
+        $redisHost     = $this->getContainer()->getParameter('bcc_resque.resque.redis.host');
+        $redisPort     = $this->getContainer()->getParameter('bcc_resque.resque.redis.port');
         $redisDatabase = $this->getContainer()->getParameter('bcc_resque.resque.redis.database');
+
         if ($redisHost != null && $redisPort != null) {
             $env['REDIS_BACKEND'] = $redisHost.':'.$redisPort;
         }
+
         if (isset($redisDatabase)) {
             $env['REDIS_BACKEND_DB'] = $redisDatabase;
         }
@@ -59,9 +77,20 @@ class StartWorkerCommand extends ContainerAwareCommand
         if (0 !== $m = (int) $input->getOption('memory-limit')) {
             $opt = sprintf('-d memory_limit=%dM', $m);
         }
-        $workerCommand = strtr('php %opt% %dir%/chrisboulton/php-resque/resque.php', array(
+
+        if (version_compare(PHP_VERSION, '5.4.0') >= 0) {
+            $phpExecutable = PHP_BINARY;
+        } else {
+            $phpExecutable = PHP_BINDIR.'/php';
+            if (defined('PHP_WINDOWS_VERSION_BUILD')) {
+                $phpExecutable = 'php';
+            }
+        }
+
+        $workerCommand = strtr('%php% %opt% %dir%/resque', array(
+            '%php%' => $phpExecutable,
             '%opt%' => $opt,
-            '%dir%' => $this->getContainer()->getParameter('bcc_resque.resque.vendor_dir'),
+            '%dir%' => __DIR__.'/../bin',
         ));
 
         if (!$input->getOption('foreground')) {
@@ -70,15 +99,13 @@ class StartWorkerCommand extends ContainerAwareCommand
                 '%logs_dir%' => $this->getContainer()->getParameter('kernel.logs_dir'),
             ));
         }
-		
-		
+
+
 		// In windows: When you pass an environment to CMD it replaces the old environment
 		// That means we create a lot of problems with respect to user accounts and missing vars
-		// this is a workaround where we add the vars to the existing environment. 
-		if (defined('PHP_WINDOWS_VERSION_BUILD'))
-		{
-			foreach($env as $key => $value)
-			{
+		// this is a workaround where we add the vars to the existing environment.
+		if (defined('PHP_WINDOWS_VERSION_BUILD')) {
+			foreach($env as $key => $value) {
 				putenv($key."=". $value);
 			}
 			$env = null;
@@ -100,11 +127,13 @@ class StartWorkerCommand extends ContainerAwareCommand
         else {
             $process->run();
             $pid = \trim($process->getOutput());
+
             if (function_exists('gethostname')) {
                 $hostname = gethostname();
             } else {
                 $hostname = php_uname('n');
             }
+
             if (!$input->getOption('quiet')) {
                 $output->writeln(\sprintf('<info>Worker started</info> %s:%s:%s', $hostname, $pid, $input->getArgument('queues')));
             }
